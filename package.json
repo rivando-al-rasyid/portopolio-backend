@@ -1,0 +1,40 @@
+{
+  "name": "portfolio-payload-cms",
+  "version": "1.0.0",
+  "description": "Payload CMS remake for the portfolio knowledge graph CMS.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "payload generate:importmap && next dev",
+    "build": "payload generate:importmap && next build --experimental-build-mode compile",
+    "start": "next start",
+    "payload": "payload",
+    "generate:types": "payload generate:types",
+    "generate:importmap": "payload generate:importmap",
+    "migrate:create": "payload migrate:create",
+    "migrate": "payload migrate",
+    "build:full": "payload generate:importmap && next build",
+    "build:generate-env": "payload generate:importmap && next build --experimental-build-mode generate-env",
+    "dev:docker": "payload generate:importmap && next dev --hostname 0.0.0.0 --port 3000",
+    "generate": "payload generate:types && payload generate:importmap"
+  },
+  "dependencies": {
+    "@payloadcms/db-postgres": "latest",
+    "@payloadcms/next": "latest",
+    "cross-env": "^7.0.3",
+    "graphql": "^16.10.0",
+    "next": "15.4.11",
+    "payload": "latest",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "sharp": "^0.34.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.7",
+    "@types/react": "^19.0.7",
+    "@types/react-dom": "^19.0.3",
+    "eslint": "^9.17.0",
+    "eslint-config-next": "15.4.11",
+    "typescript": "^5.7.2"
+  }
+}

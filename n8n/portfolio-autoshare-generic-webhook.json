@@ -1,0 +1,267 @@
+{
+  "name": "Portfolio CMS Autoshare - Generic Webhook",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 6
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Every 6 Hours",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.PAYLOAD_BASE_URL }}/api/autoshare/next",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "platform",
+              "value": "linkedin"
+            },
+            {
+              "name": "type",
+              "value": "all"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-autoshare-secret",
+              "value": "={{ $env.AUTOSHARE_WEBHOOK_SECRET }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "get-next-item",
+      "name": "Get Next Content From Payload",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\n\nif (!data.shouldShare || !data.item) {\n  return [];\n}\n\nreturn [\n  {\n    json: {\n      platform: data.platform || 'linkedin',\n      entity_type: data.item.entity_type,\n      entity_id: data.item.entity_id,\n      title: data.item.title,\n      url: data.item.url,\n      image_url: data.item.image_url || '',\n      social_text: data.item.social_text,\n      // This object is what the placeholder social webhook receives.\n      // Replace the next HTTP node with LinkedIn/X/Facebook/etc if needed.\n      post_body: {\n        text: data.item.social_text,\n        title: data.item.title,\n        url: data.item.url,\n        image_url: data.item.image_url || ''\n      }\n    }\n  }\n];"
+      },
+      "id": "prepare-social-payload",
+      "name": "Prepare Social Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        500,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_SOCIAL_POST_ENDPOINT.com/post",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer REPLACE_WITH_SOCIAL_ACCESS_TOKEN"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "text",
+              "value": "={{ $json.social_text }}"
+            },
+            {
+              "name": "title",
+              "value": "={{ $json.title }}"
+            },
+            {
+              "name": "url",
+              "value": "={{ $json.url }}"
+            },
+            {
+              "name": "image_url",
+              "value": "={{ $json.image_url }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "post-to-social",
+      "name": "Post to Social Platform - Replace This",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        760,
+        0
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $('Prepare Social Payload').first().json;\nconst response = $input.first()?.json || {};\nconst error = response.error || response.message?.error || response.message;\nconst didFail = Boolean(response.error);\n\nreturn [\n  {\n    json: {\n      success: !didFail,\n      platform: item.platform,\n      entity_type: item.entity_type,\n      entity_id: item.entity_id,\n      title: item.title,\n      source_url: item.url,\n      shared_url: response.url || response.permalink || response.postUrl || item.url,\n      message: didFail ? 'Social platform post failed in n8n.' : 'Posted by n8n autoshare workflow.',\n      error: didFail ? JSON.stringify(error || response).slice(0, 1200) : ''\n    }\n  }\n];"
+      },
+      "id": "build-complete-payload",
+      "name": "Build Completion Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1020,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.PAYLOAD_BASE_URL }}/api/autoshare/complete",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-autoshare-secret",
+              "value": "={{ $env.AUTOSHARE_WEBHOOK_SECRET }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "success",
+              "value": "={{ $json.success }}"
+            },
+            {
+              "name": "platform",
+              "value": "={{ $json.platform }}"
+            },
+            {
+              "name": "entity_type",
+              "value": "={{ $json.entity_type }}"
+            },
+            {
+              "name": "entity_id",
+              "value": "={{ $json.entity_id }}"
+            },
+            {
+              "name": "title",
+              "value": "={{ $json.title }}"
+            },
+            {
+              "name": "source_url",
+              "value": "={{ $json.source_url }}"
+            },
+            {
+              "name": "shared_url",
+              "value": "={{ $json.shared_url }}"
+            },
+            {
+              "name": "message",
+              "value": "={{ $json.message }}"
+            },
+            {
+              "name": "error",
+              "value": "={{ $json.error }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "mark-complete",
+      "name": "Mark Complete in Payload",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1280,
+        0
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Every 6 Hours": {
+      "main": [
+        [
+          {
+            "node": "Get Next Content From Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Next Content From Payload": {
+      "main": [
+        [
+          {
+            "node": "Prepare Social Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Social Payload": {
+      "main": [
+        [
+          {
+            "node": "Post to Social Platform - Replace This",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Post to Social Platform - Replace This": {
+      "main": [
+        [
+          {
+            "node": "Build Completion Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Completion Payload": {
+      "main": [
+        [
+          {
+            "node": "Mark Complete in Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "portfolio-autoshare-generic-1",
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}
