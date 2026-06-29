@@ -5,8 +5,14 @@
 {$PUBLIC_HOST} {
   encode gzip zstd
 
+  # Payload admin dashboard.
   @payload_admin path /admin /admin/*
-  @payload_api path /api /api/* /graphql /graphql/* /_next/* /media/*
+
+  # Payload REST/GraphQL APIs and Next.js admin assets.
+  @payload_api path /api /api/* /graphql /graphql/* /_next /_next/* /media /media/*
+
+  # n8n under /n8n/.
+  # Keep the /n8n prefix because N8N_PATH=/n8n/ is set.
   @n8n path /n8n /n8n/*
 
   handle @payload_admin {
@@ -17,8 +23,6 @@
     reverse_proxy payload:3000
   }
 
-  # n8n is served under /n8n/ on the same public host.
-  # Keep the /n8n prefix because N8N_PATH=/n8n/ is set in compose.yaml.
   handle @n8n {
     reverse_proxy n8n:5678
   }
