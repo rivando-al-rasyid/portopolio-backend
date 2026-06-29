@@ -6,14 +6,16 @@
   "private": true,
   "scripts": {
     "dev": "payload generate:importmap && next dev",
-    "build": "payload generate:importmap && next build",
+    "build": "payload generate:importmap && next build --experimental-build-mode compile",
     "start": "next start",
     "payload": "payload",
     "generate:types": "payload generate:types",
     "generate:importmap": "payload generate:importmap",
     "migrate:create": "payload migrate:create",
     "migrate": "payload migrate",
+    "build:full": "payload generate:importmap && next build",
     "build:generate-env": "payload generate:importmap && next build --experimental-build-mode generate-env",
+    "dev:docker": "payload generate:importmap && next dev --hostname 0.0.0.0 --port 3000",
     "generate": "payload generate:types && payload generate:importmap"
   },
   "dependencies": {

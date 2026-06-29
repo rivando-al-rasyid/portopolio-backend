@@ -1,8 +1,8 @@
 import path from 'node:path'
+import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { postgresAdapter } from '@payloadcms/db-postgres'
 import { buildConfig } from 'payload'
-import sharp from 'sharp'
 
 import { BlogPosts } from '@/collections/BlogPosts'
 import { Categories } from '@/collections/Categories'
@@ -15,6 +15,8 @@ import { SiteSettings } from '@/globals/SiteSettings'
 
 const filename = fileURLToPath(import.meta.url)
 const dirname = path.dirname(filename)
+const require = createRequire(import.meta.url)
+const sharp = require('sharp')
 
 const payloadServerURL =
   process.env.PAYLOAD_PUBLIC_SERVER_URL || process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'
