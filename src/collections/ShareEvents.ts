@@ -20,6 +20,7 @@ export const ShareEvents: CollectionConfig = {
       name: 'entity_type',
       type: 'select',
       required: true,
+      index: true,
       options: [
         { label: 'Blog', value: 'blog' },
         { label: 'Project', value: 'project' },
@@ -29,6 +30,7 @@ export const ShareEvents: CollectionConfig = {
       name: 'blog_post',
       type: 'relationship',
       relationTo: 'blog-posts',
+      index: true,
       admin: {
         condition: (_, siblingData) => siblingData?.entity_type === 'blog',
       },
@@ -37,6 +39,7 @@ export const ShareEvents: CollectionConfig = {
       name: 'project',
       type: 'relationship',
       relationTo: 'projects',
+      index: true,
       admin: {
         condition: (_, siblingData) => siblingData?.entity_type === 'project',
       },
@@ -45,6 +48,7 @@ export const ShareEvents: CollectionConfig = {
       name: 'platform',
       type: 'text',
       required: true,
+      index: true,
     },
     {
       name: 'url',
@@ -61,6 +65,7 @@ export const ShareEvents: CollectionConfig = {
       type: 'date',
       required: true,
       defaultValue: () => new Date().toISOString(),
+      index: true,
       admin: {
         date: {
           pickerAppearance: 'dayAndTime',

@@ -18,10 +18,30 @@ const dirname = path.dirname(filename)
 const require = createRequire(import.meta.url)
 const sharp = require('sharp')
 
-const payloadServerURL =
-  process.env.PAYLOAD_PUBLIC_SERVER_URL || process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'
+function env(name: string, fallback = ''): string {
+  return process.env[name]?.trim() || fallback
+}
 
-const trustedOrigins = [payloadServerURL, process.env.FRONTEND_ORIGIN].filter(Boolean) as string[]
+function requiredRuntimeEnv(name: string): string {
+  const value = env(name)
+
+  if (!value && process.env.NODE_ENV === 'production') {
+    throw new Error(`${name} is required in production runtime.`)
+  }
+
+  return value
+}
+
+function uniqueOrigins(...origins: Array<string | undefined>): string[] {
+  return Array.from(new Set(origins.map((origin) => origin?.trim()).filter(Boolean) as string[]))
+}
+
+const payloadServerURL = env(
+  'PAYLOAD_PUBLIC_SERVER_URL',
+  env('NEXT_PUBLIC_SITE_URL', 'http://localhost:3000'),
+)
+
+const trustedOrigins = uniqueOrigins(payloadServerURL, process.env.FRONTEND_ORIGIN)
 
 export default buildConfig({
   serverURL: payloadServerURL,
@@ -49,10 +69,10 @@ export default buildConfig({
   db: postgresAdapter({
     idType: 'uuid',
     pool: {
-      connectionString: process.env.DATABASE_URL || '',
+      connectionString: env('DATABASE_URL'),
     },
   }),
-  secret: process.env.PAYLOAD_SECRET || '',
+  secret: requiredRuntimeEnv('PAYLOAD_SECRET'),
   sharp,
   typescript: {
     outputFile: path.resolve(dirname, 'payload-types.ts'),

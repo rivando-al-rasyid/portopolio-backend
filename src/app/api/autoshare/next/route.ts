@@ -1,7 +1,19 @@
 import config from '@payload-config'
 import { getPayload } from 'payload'
+import {
+  absoluteUrl,
+  asContentFilter,
+  assetUrl,
+  assertAutoshareSecret,
+  candidateLimit,
+  cleanText,
+  docId,
+  type ContentFilter,
+  type EntityType,
+} from '@/lib/autoshare'
 
-type EntityType = 'blog' | 'project'
+export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
 
 type ShareEventDoc = {
   entity_type?: EntityType
@@ -15,7 +27,6 @@ type BlogPostDoc = {
   slug: string
   excerpt?: string | null
   content?: string | null
-  status?: string | null
   published_at?: string | null
   updatedAt?: string | null
   cover_image?: string | { id?: string; url?: string; alt?: string } | null
@@ -27,64 +38,43 @@ type ProjectDoc = {
   slug: string
   summary?: string | null
   content?: string | null
-  status?: string | null
   updatedAt?: string | null
   image?: string | { id?: string; url?: string; alt?: string } | null
   demo_url?: string | null
   repo_url?: string | null
 }
 
-function assertAutoshareSecret(request: Request) {
-  const expected = process.env.AUTOSHARE_WEBHOOK_SECRET
-  const actual = request.headers.get('x-autoshare-secret')
-
-  if (!expected || actual !== expected) {
-    return Response.json({ error: 'Unauthorized' }, { status: 401 })
-  }
-
-  return null
-}
-
-function docId(value: unknown): string | null {
-  if (!value) return null
-  if (typeof value === 'string') return value
-  if (typeof value === 'object' && 'id' in value && typeof value.id === 'string') return value.id
-  return null
-}
-
-function absoluteUrl(path: string) {
-  const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'
-  return new URL(path, baseUrl).toString()
-}
-
-function assetUrl(value: unknown): string | null {
-  if (!value || typeof value !== 'object' || !('url' in value)) return null
-  if (typeof value.url !== 'string') return null
-  return absoluteUrl(value.url)
-}
-
-function cleanText(value?: string | null, maxLength = 220) {
-  const text = (value || '').replace(/\s+/g, ' ').trim()
-  if (text.length <= maxLength) return text
-  return `${text.slice(0, maxLength - 1).trim()}…`
-}
-
-function buildSocialText(input: {
+type Candidate = {
   entityType: EntityType
+  id: string
   title: string
-  description?: string | null
+  slug: string
+  description: string
   url: string
-}) {
-  const label = input.entityType === 'blog' ? 'New blog post' : 'New project'
-  const description = cleanText(input.description, 180)
+  image_url: string | null
+  sortDate?: string | null
+  extra?: Record<string, string | null | undefined>
+}
 
-  return [
-    `${label}: ${input.title}`,
-    description,
-    input.url,
-  ]
+function buildSocialText(input: Pick<Candidate, 'entityType' | 'title' | 'description' | 'url'>): string {
+  const label = input.entityType === 'blog' ? 'New blog post' : 'New project'
+  return [`${label}: ${input.title}`, cleanText(input.description, 180), input.url]
     .filter(Boolean)
     .join('\n\n')
+}
+
+function oldestFirst(left?: string | null, right?: string | null): number {
+  const leftTime = left ? new Date(left).getTime() : 0
+  const rightTime = right ? new Date(right).getTime() : 0
+  return leftTime - rightTime
+}
+
+function shouldFetchBlog(contentFilter: ContentFilter): boolean {
+  return contentFilter === 'all' || contentFilter === 'blog'
+}
+
+function shouldFetchProject(contentFilter: ContentFilter): boolean {
+  return contentFilter === 'all' || contentFilter === 'project'
 }
 
 export async function GET(request: Request) {
@@ -92,10 +82,10 @@ export async function GET(request: Request) {
   if (unauthorized) return unauthorized
 
   const url = new URL(request.url)
-  const platform = url.searchParams.get('platform') || 'linkedin'
-  const contentType = url.searchParams.get('type') || 'all'
+  const platform = url.searchParams.get('platform')?.trim() || 'linkedin'
+  const contentFilter = asContentFilter(url.searchParams.get('type') || 'all')
 
-  if (!['all', 'blog', 'project'].includes(contentType)) {
+  if (!contentFilter) {
     return Response.json({ error: 'Invalid type. Use all, blog, or project.' }, { status: 400 })
   }
 
@@ -104,81 +94,106 @@ export async function GET(request: Request) {
   const now = new Date().toISOString()
 
   if (!status?.is_enabled || status?.status === 'paused') {
+    const reason = status?.status === 'paused' ? 'paused' : 'disabled'
+
     await payload.updateGlobal({
       slug: 'autoshare-status',
       overrideAccess: true,
       data: {
         is_enabled: Boolean(status?.is_enabled),
-        status: status?.status === 'paused' ? 'paused' : 'idle',
+        status: reason === 'paused' ? 'paused' : 'idle',
         last_checked_at: now,
-        last_message: status?.status === 'paused' ? 'Autoshare is paused.' : 'Autoshare is disabled.',
+        last_message: reason === 'paused' ? 'Autoshare is paused.' : 'Autoshare is disabled.',
       },
     })
 
-    return Response.json({
-      shouldShare: false,
-      reason: status?.status === 'paused' ? 'paused' : 'disabled',
-    })
+    return Response.json({ shouldShare: false, reason })
   }
 
-  const shareEvents = await payload.find({
-    collection: 'share-events',
-    overrideAccess: true,
-    depth: 0,
-    limit: 1000,
-    where: {
-      platform: {
-        equals: platform,
-      },
-    },
-  })
+  const limit = candidateLimit()
+  const [postsResult, projectsResult] = await Promise.all([
+    shouldFetchBlog(contentFilter)
+      ? payload.find({
+          collection: 'blog-posts',
+          overrideAccess: true,
+          depth: 1,
+          limit,
+          sort: 'published_at',
+          where: {
+            status: {
+              equals: 'published',
+            },
+          },
+        })
+      : Promise.resolve({ docs: [] }),
+    shouldFetchProject(contentFilter)
+      ? payload.find({
+          collection: 'projects',
+          overrideAccess: true,
+          depth: 1,
+          limit,
+          sort: 'updatedAt',
+          where: {
+            status: {
+              equals: 'published',
+            },
+          },
+        })
+      : Promise.resolve({ docs: [] }),
+  ])
 
-  const sharedBlogIds = new Set<string>()
-  const sharedProjectIds = new Set<string>()
+  const posts = postsResult.docs as BlogPostDoc[]
+  const projects = projectsResult.docs as ProjectDoc[]
+  const postIds = posts.map((post) => post.id)
+  const projectIds = projects.map((project) => project.id)
 
-  for (const event of shareEvents.docs as ShareEventDoc[]) {
-    if (event.entity_type === 'blog') {
-      const id = docId(event.blog_post)
-      if (id) sharedBlogIds.add(id)
-    }
+  const [blogShareEvents, projectShareEvents] = await Promise.all([
+    postIds.length
+      ? payload.find({
+          collection: 'share-events',
+          overrideAccess: true,
+          depth: 0,
+          limit: postIds.length,
+          pagination: false,
+          where: {
+            and: [
+              { platform: { equals: platform } },
+              { entity_type: { equals: 'blog' } },
+              { blog_post: { in: postIds } },
+            ],
+          },
+        })
+      : Promise.resolve({ docs: [] }),
+    projectIds.length
+      ? payload.find({
+          collection: 'share-events',
+          overrideAccess: true,
+          depth: 0,
+          limit: projectIds.length,
+          pagination: false,
+          where: {
+            and: [
+              { platform: { equals: platform } },
+              { entity_type: { equals: 'project' } },
+              { project: { in: projectIds } },
+            ],
+          },
+        })
+      : Promise.resolve({ docs: [] }),
+  ])
 
-    if (event.entity_type === 'project') {
-      const id = docId(event.project)
-      if (id) sharedProjectIds.add(id)
-    }
-  }
+  const sharedBlogIds = new Set(
+    (blogShareEvents.docs as ShareEventDoc[]).map((event) => docId(event.blog_post)).filter(Boolean),
+  )
+  const sharedProjectIds = new Set(
+    (projectShareEvents.docs as ShareEventDoc[]).map((event) => docId(event.project)).filter(Boolean),
+  )
 
-  const candidates: Array<{
-    entityType: EntityType
-    id: string
-    title: string
-    slug: string
-    description?: string | null
-    url: string
-    image_url?: string | null
-    sortDate?: string | null
-    extra?: Record<string, unknown>
-  }> = []
-
-  if (contentType === 'all' || contentType === 'blog') {
-    const posts = await payload.find({
-      collection: 'blog-posts',
-      overrideAccess: true,
-      depth: 1,
-      limit: 50,
-      sort: 'published_at',
-      where: {
-        status: {
-          equals: 'published',
-        },
-      },
-    })
-
-    for (const post of posts.docs as BlogPostDoc[]) {
-      if (sharedBlogIds.has(post.id)) continue
-
-      candidates.push({
-        entityType: 'blog',
+  const candidates: Candidate[] = [
+    ...posts
+      .filter((post) => !sharedBlogIds.has(post.id))
+      .map((post) => ({
+        entityType: 'blog' as const,
         id: post.id,
         title: post.title,
         slug: post.slug,
@@ -186,29 +201,11 @@ export async function GET(request: Request) {
         url: absoluteUrl(`/blog/${post.slug}`),
         image_url: assetUrl(post.cover_image),
         sortDate: post.published_at || post.updatedAt,
-      })
-    }
-  }
-
-  if (contentType === 'all' || contentType === 'project') {
-    const projects = await payload.find({
-      collection: 'projects',
-      overrideAccess: true,
-      depth: 1,
-      limit: 50,
-      sort: 'updatedAt',
-      where: {
-        status: {
-          equals: 'published',
-        },
-      },
-    })
-
-    for (const project of projects.docs as ProjectDoc[]) {
-      if (sharedProjectIds.has(project.id)) continue
-
-      candidates.push({
-        entityType: 'project',
+      })),
+    ...projects
+      .filter((project) => !sharedProjectIds.has(project.id))
+      .map((project) => ({
+        entityType: 'project' as const,
         id: project.id,
         title: project.title,
         slug: project.slug,
@@ -220,15 +217,8 @@ export async function GET(request: Request) {
           demo_url: project.demo_url,
           repo_url: project.repo_url,
         },
-      })
-    }
-  }
-
-  candidates.sort((a, b) => {
-    const left = a.sortDate ? new Date(a.sortDate).getTime() : 0
-    const right = b.sortDate ? new Date(b.sortDate).getTime() : 0
-    return left - right
-  })
+      })),
+  ].sort((left, right) => oldestFirst(left.sortDate, right.sortDate))
 
   const next = candidates[0]
 
@@ -276,12 +266,7 @@ export async function GET(request: Request) {
       description: next.description,
       url: next.url,
       image_url: next.image_url,
-      social_text: buildSocialText({
-        entityType: next.entityType,
-        title: next.title,
-        description: next.description,
-        url: next.url,
-      }),
+      social_text: buildSocialText(next),
       ...next.extra,
     },
   })

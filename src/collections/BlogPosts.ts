@@ -19,15 +19,16 @@ export const BlogPosts: CollectionConfig = {
   hooks: {
     beforeValidate: [
       ({ data }) => {
-        if (data && !data.slug && data.title) {
-          data.slug = formatSlug(data.title)
-        }
+        if (!data) return data
 
-        if (data?.status === 'published' && !data.published_at) {
-          data.published_at = new Date().toISOString()
+        return {
+          ...data,
+          slug: data.slug || formatSlug(data.title),
+          published_at:
+            data.status === 'published' && !data.published_at
+              ? new Date().toISOString()
+              : data.published_at,
         }
-
-        return data
       },
     ],
   },
@@ -61,7 +62,6 @@ export const BlogPosts: CollectionConfig = {
               defaultValue: '',
               admin: {
                 rows: 18,
-                description: 'Markdown/plain text content. Kept simple to match the previous database shape.',
               },
             },
             {
@@ -79,6 +79,7 @@ export const BlogPosts: CollectionConfig = {
               type: 'select',
               required: true,
               defaultValue: 'draft',
+              index: true,
               options: [
                 { label: 'Draft', value: 'draft' },
                 { label: 'Published', value: 'published' },
@@ -87,6 +88,7 @@ export const BlogPosts: CollectionConfig = {
             {
               name: 'published_at',
               type: 'date',
+              index: true,
               admin: {
                 date: {
                   pickerAppearance: 'dayAndTime',
@@ -97,12 +99,14 @@ export const BlogPosts: CollectionConfig = {
               name: 'is_featured',
               type: 'checkbox',
               defaultValue: false,
+              index: true,
             },
             {
               name: 'sort_order',
               type: 'number',
               defaultValue: 100,
               required: true,
+              index: true,
             },
             {
               name: 'categories',

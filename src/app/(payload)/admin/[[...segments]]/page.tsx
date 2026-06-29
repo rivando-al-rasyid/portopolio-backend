@@ -10,16 +10,14 @@ type Args = {
   searchParams: Promise<SearchParamsWithUndefined>
 }
 
-const sanitizeSearchParams = async (
+async function sanitizeSearchParams(
   searchParams: Promise<SearchParamsWithUndefined>,
-): Promise<PayloadSearchParams> => {
+): Promise<PayloadSearchParams> {
   const resolved = await searchParams
   const cleaned: PayloadSearchParams = {}
 
   for (const [key, value] of Object.entries(resolved)) {
-    if (value !== undefined) {
-      cleaned[key] = value
-    }
+    if (value !== undefined) cleaned[key] = value
   }
 
   return cleaned
@@ -32,12 +30,11 @@ export const generateMetadata = ({ params, searchParams }: Args) =>
     searchParams: sanitizeSearchParams(searchParams),
   })
 
-const Page = ({ params, searchParams }: Args) =>
-  RootPage({
+export default function Page({ params, searchParams }: Args) {
+  return RootPage({
     config,
     params,
     searchParams: sanitizeSearchParams(searchParams),
     importMap,
   })
-
-export default Page
+}

@@ -1,10 +1,19 @@
 import config from '@payload-config'
 import { getPayload } from 'payload'
+import {
+  asBoolean,
+  asEntityType,
+  asString,
+  assertAutoshareSecret,
+  readRequestBody,
+  type EntityType,
+} from '@/lib/autoshare'
 
-type EntityType = 'blog' | 'project'
+export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
 
 type CompleteBody = {
-  success?: boolean | string
+  success?: boolean | string | number
   platform?: string
   entity_type?: EntityType
   entity_id?: string
@@ -15,67 +24,26 @@ type CompleteBody = {
   error?: string
 }
 
-function assertAutoshareSecret(request: Request) {
-  const expected = process.env.AUTOSHARE_WEBHOOK_SECRET
-  const actual = request.headers.get('x-autoshare-secret')
-
-  if (!expected || actual !== expected) {
-    return Response.json({ error: 'Unauthorized' }, { status: 401 })
-  }
-
-  return null
-}
-
-function isEntityType(value: unknown): value is EntityType {
-  return value === 'blog' || value === 'project'
-}
-
-async function readRequestBody(request: Request): Promise<CompleteBody> {
-  const contentType = request.headers.get('content-type') || ''
-
-  if (contentType.includes('application/json')) {
-    return (await request.json()) as CompleteBody
-  }
-
-  if (
-    contentType.includes('application/x-www-form-urlencoded') ||
-    contentType.includes('multipart/form-data')
-  ) {
-    const formData = await request.formData()
-    return Object.fromEntries(formData.entries()) as CompleteBody
-  }
-
-  try {
-    return (await request.json()) as CompleteBody
-  } catch {
-    const formData = await request.formData()
-    return Object.fromEntries(formData.entries()) as CompleteBody
-  }
-}
-
 export async function POST(request: Request) {
   const unauthorized = assertAutoshareSecret(request)
   if (unauthorized) return unauthorized
 
-  const body = await readRequestBody(request)
+  const body = await readRequestBody<CompleteBody>(request)
+  const platform = asString(body.platform)
+  const entityType = asEntityType(body.entity_type)
+  const entityId = asString(body.entity_id)
+  const didSucceed = asBoolean(body.success)
+
+  if (!platform) return Response.json({ error: 'platform is required' }, { status: 400 })
+  if (!entityType) return Response.json({ error: 'entity_type must be blog or project' }, { status: 400 })
+  if (!entityId) return Response.json({ error: 'entity_id is required' }, { status: 400 })
+
   const payload = await getPayload({ config })
   const now = new Date().toISOString()
-
-  if (!body.platform) {
-    return Response.json({ error: 'platform is required' }, { status: 400 })
-  }
-
-  if (!isEntityType(body.entity_type)) {
-    return Response.json({ error: 'entity_type must be blog or project' }, { status: 400 })
-  }
-
-  if (!body.entity_id) {
-    return Response.json({ error: 'entity_id is required' }, { status: 400 })
-  }
-
-  const currentStatus = await payload.findGlobal({ slug: 'autoshare-status', overrideAccess: true })
-
-  const didSucceed = body.success === true || body.success === 'true'
+  const currentStatus = await payload.findGlobal({
+    slug: 'autoshare-status',
+    overrideAccess: true,
+  })
 
   if (!didSucceed) {
     const status = await payload.updateGlobal({
@@ -84,37 +52,30 @@ export async function POST(request: Request) {
       data: {
         is_enabled: Boolean(currentStatus?.is_enabled),
         status: 'failed',
-        platform: body.platform,
+        platform,
         last_checked_at: now,
-        last_message: body.message || `Autoshare failed for ${body.entity_type}.`,
-        last_error: body.error || 'Unknown autoshare error.',
+        last_message: asString(body.message) || `Autoshare failed for ${entityType}.`,
+        last_error: asString(body.error) || 'Unknown autoshare error.',
       },
     })
 
-    return Response.json({
-      ok: false,
-      status,
-    })
+    return Response.json({ ok: false, status })
   }
 
-  const eventData: Record<string, unknown> = {
-    entity_type: body.entity_type,
-    platform: body.platform,
-    url: body.shared_url || body.source_url || '',
-    title: body.title || `Shared ${body.entity_type}`,
-    created_at: now,
-  }
-
-  if (body.entity_type === 'blog') {
-    eventData.blog_post = body.entity_id
-  } else {
-    eventData.project = body.entity_id
-  }
+  const sharedURL = asString(body.shared_url) || asString(body.source_url)
+  if (!sharedURL) return Response.json({ error: 'shared_url or source_url is required' }, { status: 400 })
 
   const event = await payload.create({
     collection: 'share-events',
     overrideAccess: true,
-    data: eventData,
+    data: {
+      entity_type: entityType,
+      [entityType === 'blog' ? 'blog_post' : 'project']: entityId,
+      platform,
+      url: sharedURL,
+      title: asString(body.title) || `Shared ${entityType}`,
+      created_at: now,
+    },
   })
 
   const status = await payload.updateGlobal({
@@ -123,17 +84,13 @@ export async function POST(request: Request) {
     data: {
       is_enabled: Boolean(currentStatus?.is_enabled),
       status: 'success',
-      platform: body.platform,
+      platform,
       last_checked_at: now,
       last_shared_at: now,
-      last_message: body.message || `Autoshare completed for ${body.title || body.entity_id}.`,
+      last_message: asString(body.message) || `Autoshare completed for ${asString(body.title) || entityId}.`,
       last_error: null,
     },
   })
 
-  return Response.json({
-    ok: true,
-    event,
-    status,
-  })
+  return Response.json({ ok: true, event, status })
 }

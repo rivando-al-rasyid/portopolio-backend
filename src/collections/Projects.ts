@@ -18,13 +18,7 @@ export const Projects: CollectionConfig = {
   },
   hooks: {
     beforeValidate: [
-      ({ data }) => {
-        if (data && !data.slug && data.title) {
-          data.slug = formatSlug(data.title)
-        }
-
-        return data
-      },
+      ({ data }) => (data ? { ...data, slug: data.slug || formatSlug(data.title) } : data),
     ],
   },
   fields: [
@@ -91,6 +85,7 @@ export const Projects: CollectionConfig = {
               type: 'select',
               required: true,
               defaultValue: 'draft',
+              index: true,
               options: [
                 { label: 'Draft', value: 'draft' },
                 { label: 'Published', value: 'published' },
@@ -100,12 +95,14 @@ export const Projects: CollectionConfig = {
               name: 'is_featured',
               type: 'checkbox',
               defaultValue: false,
+              index: true,
             },
             {
               name: 'sort_order',
               type: 'number',
               defaultValue: 100,
               required: true,
+              index: true,
             },
             {
               name: 'categories',

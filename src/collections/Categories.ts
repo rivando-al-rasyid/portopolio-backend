@@ -18,12 +18,7 @@ export const Categories: CollectionConfig = {
   },
   hooks: {
     beforeValidate: [
-      ({ data }) => {
-        if (data && !data.slug && data.name) {
-          data.slug = formatSlug(data.name)
-        }
-        return data
-      },
+      ({ data }) => (data ? { ...data, slug: data.slug || formatSlug(data.name) } : data),
     ],
   },
   fields: [
